@@ -1,6 +1,7 @@
 lib_grove_RHT03
 ===============
 
+*IMPORTANT*: for correct working, the RHT03 needs the "Grove input capture library". Download and import it inside your project, otherwise errors will be encountered.<br>
 OpenPicus Flyport library for RHT03 humidity and temperature sensor. The library can be used to read both humidity and temperature from the RHT03 sensor.More infos on wiki.openpicus.com.
 <br>1) import files inside Flyport IDE using the external libs button.<br>
 2) add following code example in FlyportTask.c:
