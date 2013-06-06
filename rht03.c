@@ -183,7 +183,7 @@ static int RHT03_set(void * _self,va_list *app)
 	DWORD next_tick = TickConvertToMilliseconds(TickGet());
 	if((next_tick - self->prev_tick) < DELAY)
 	{
-		return 1;
+		return 0;
 		//vTaskDelay((DELAY -(next_tick - self->prev_tick))/10);
 		//next_tick = TickConvertToMilliseconds(TickGet());
 	}
@@ -214,6 +214,7 @@ static int RHT03_set(void * _self,va_list *app)
 	if(!timeout)
 	{
 		xTaskResumeAll();
+		self->prev_tick=0;
 		return -1;
 	}
 	
@@ -224,10 +225,16 @@ static int RHT03_set(void * _self,va_list *app)
 	ICOff(self->ic_module);
 	xTaskResumeAll();
 	if(error)
+	{
+		self->prev_tick = 0;
 		return -1;
+	}
 	//check the data out
 	if(checksum(data1,data2))
+	{
+		self->prev_tick = 0;
 		return -1;
+	}
 	else
 	{
 		self->humidity = (data1>>16)/10.0;
