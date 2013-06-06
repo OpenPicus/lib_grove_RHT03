@@ -59,6 +59,8 @@
 
 
 extern unsigned char flag;
+
+#define DELAY 	2000
 struct Interface *attachSensorToDigioBus(void *,int,int);
 
 
@@ -72,6 +74,9 @@ struct RHT03
 	struct Interface *inter;
 	BYTE bitone_lenght;
 	BYTE ic_module;
+	float temperature;
+	float humidity;	
+	DWORD prev_tick;
 };
 
 
@@ -105,6 +110,9 @@ static void *RHT03_ctor (void * _self, va_list *app)
 {
 	struct RHT03 *self = _self;
 	self->inter = NULL;
+	self->temperature = -1;
+	self->humidity = -1;
+	self->prev_tick = 0;
 	return self;
 }	
 
@@ -160,19 +168,29 @@ static int RHT03_configure (void * _self, va_list *app)
 	return 0;
 }	
 
+
 /**
- * static float RHT03_get(void * _self,va_list *app) -  read a float value from the rht03 device.
+ * static float RHT03_set(void * _self,va_list *app) -  Perform a new acquisition.
  * \param *_self - pointer to the device 
- * \param *app - HUMD / TEMP  
-  <UL>
-	<LI><B HUMD </B> Get humidity value.</LI> 
-	<LI><B TEMP </B> Get temperature value.</LI> 
- * \return the Temperature or humidity values:
+ * \return:
+ 	<LI><Breturn = 0:</B> The operation was successful</LI>
+	<LI><B>return = -1:</B> The operation was unsuccessful.</LI> 
+ </UL>
  */
-static float RHT03_get(void * _self,va_list *app)
+static int RHT03_set(void * _self,va_list *app)
 {
 	struct RHT03 *self = _self;
-	BYTE h_t= va_arg(*app, const BYTE);
+	DWORD next_tick = TickConvertToMilliseconds(TickGet());
+	if((next_tick - self->prev_tick) < DELAY)
+	{
+		return 1;
+		//vTaskDelay((DELAY -(next_tick - self->prev_tick))/10);
+		//next_tick = TickConvertToMilliseconds(TickGet());
+	}
+	else
+		self->prev_tick = next_tick;
+
+	/*pre-trigger procedure*/
 	IOInit(self->inter->port->Pin1,IN);
 	Delay10us(20);
 	unsigned long data1,data2;
@@ -180,8 +198,9 @@ static float RHT03_get(void * _self,va_list *app)
 	IOInit(self->inter->port->Pin1,OUT);
 	IOPut(self->inter->port->Pin1,OFF);
 	Delay10us(300);
+
+	/*****Trigger procedure********/
 	vTaskSuspendAll();
-	/*****Start the trigger procedure********/
 	IOInit(self->inter->port->Pin1,IN);
 	while((!IOGet(self->inter->port->Pin1))&&timeout)
 		timeout--;
@@ -195,9 +214,9 @@ static float RHT03_get(void * _self,va_list *app)
 	if(!timeout)
 	{
 		xTaskResumeAll();
-		flag = 1;
 		return -1;
 	}
+	
 	/*******Decode the incoming pulses from RHT03 device**************/
 	error = OneWireDecode(self->ic_module,40,32,&data1); 
 	if(!error)
@@ -205,35 +224,45 @@ static float RHT03_get(void * _self,va_list *app)
 	ICOff(self->ic_module);
 	xTaskResumeAll();
 	if(error)
-	{
-		flag = -1; 
 		return -1;
-	}
-
 	//check the data out
 	if(checksum(data1,data2))
-	{
-		flag = 1;
 		return -1;
-	}
 	else
 	{
-		if(!h_t)//Humidity 
-		{
-			float h = ((float)(data1>>16))/10.0;
-			return h;
-		}
-		else//temperature
-		{
-			float temp;
-			unsigned int temp_ = data1&0x7FFF;
-			if(data1&0x8000)
-				temp = -(float)temp_/10.0;//negative temperature value		
-			else
-				temp = (float)temp_/10.0;		
-			return temp;
-		}	
+		self->humidity = (data1>>16)/10.0;
+		unsigned int temp_ = data1&0x7FFF;
+		if(data1&0x8000)
+			self->temperature = -(float)temp_/10.0;//negative temperature value		
+		else
+			self->temperature = (float)temp_/10.0;		
 	}
+	return 0;
+}	
+
+
+/**
+ * static float RHT03_get(void * _self,va_list *app) -  read a float value from the rht03 device.
+ * \param *_self - pointer to the device 
+ * \param *app - HUMD / TEMP  
+  <UL>
+	<LI><B HUMD </B> Get humidity value.</LI> 
+	<LI><B TEMP </B> Get temperature value.</LI> 
+ * \return the Temperature or humidity values:
+ */
+static float RHT03_get(void * _self,va_list *app)
+{
+	struct RHT03 *self = _self;
+	BYTE h_t= va_arg(*app, const BYTE);
+	set(_self);
+	if(!h_t)//Humidity 
+	{
+		return self->humidity;
+	}
+	else//temperature
+	{
+		return self->temperature;
+	}	
 }	
 
 static const struct SensorClass _RHT03 =
@@ -243,7 +272,7 @@ static const struct SensorClass _RHT03 =
 	RHT03_dtor,
 	RHT03_attach,
 	RHT03_configure,
-	0,
+	RHT03_set,
 	RHT03_get,
 };
 
